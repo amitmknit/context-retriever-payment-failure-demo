@@ -1,0 +1,82 @@
+# Payment-Failure Resolution Demo — Redis Context Retriever
+
+An end-to-end, **live-tested** demo of [Redis Context Retriever](https://redis.io/docs/latest/develop/ai/context-engine/context-retriever/):
+model a payment-failure domain over Redis-resident data, let Context Retriever
+auto-generate the MCP tool surface, and have an agent resolve *"Customer 1042's
+payment just failed — what happened and what should we do?"* using only those
+generated tools — no SQL, no direct Redis access from the agent.
+
+Full design, field/index tables, and — importantly — what was actually verified
+live vs. assumed: [`docs/specs/payment-failure-context-retriever-demo.md`](docs/specs/payment-failure-context-retriever-demo.md).
+
+## What's real vs. simulated
+
+Everything in this demo ran against a real Redis Cloud database and a real
+Context Retriever service — nothing here is mocked. The one thing **not**
+demonstrated as working is agent-key access-tag governance (tested live, did not
+filter — see the spec's governance section).
+
+## Prerequisites
+
+- Python 3.11+ (the package requires it; `.venv` here was built with 3.13).
+- A Redis Cloud database and a Context Retriever service already created for it
+  (Redis Cloud console → **Context Retriever** → New service). This is private
+  preview — see [Get access](https://redis.io/docs/latest/develop/ai/context-engine/context-retriever/#get-started-with-redis-context-retriever).
+- An **admin key** for that service. The Cloud console doesn't display one
+  directly on the service page; get it via:
+  ```bash
+  ctxctl auth login --username <your-redis-cloud-email>   # session login (SSO accounts may fail — see note below)
+  ctxctl admin create --name "<your-name>-admin"
+  ```
+  If your account uses SSO (common for `@redis.com`), `auth login` returns
+  `403` — there's no CLI SSO flow in this client version. Get a session-based
+  admin key another way (internal Context Retriever contact, or a Cloud
+  console account-level API key page if one exists for your org) and skip the
+  CLI login step.
+- An **agent key** for the surface (`ctxctl agent create --name <name> --surface-id <id>`
+  or via the console's Agent Keys tab).
+
+## Setup
+
+```bash
+python3.11 -m venv .venv   # or 3.12/3.13
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env   # if starting fresh; this repo's .env is already git-ignored
+```
+
+Fill in `.env`:
+```
+REDIS_ADDR=<host:port>
+REDIS_USERNAME=default
+REDIS_PASSWORD=<password>
+REDIS_TLS=<true|false>
+
+CTX_MCP_ENDPOINT=<service MCP URL, e.g. https://gcp-us-east4.context-surfaces.redis.io/mcp>
+CTX_AGENT_KEY=<cs_agent_...>
+CTX_ADMIN_KEY=<cs_admin_...>
+CTX_SURFACE_ID=<surface id — printed by update_model.py, or from the console URL>
+```
+
+**Never commit `.env` or paste these values anywhere outside it** — `.env` is
+git-ignored. If any of these were ever pasted into a chat/log, rotate them.
+
+## Run order
+
+```bash
+.venv/bin/python3 update_model.py     # extends the surface's entity model (idempotent: safe to re-run)
+.venv/bin/python3 seed_data.py        # imports ~22 sample records via UnifiedClient.import_data
+.venv/bin/python3 demo_agent_flow.py  # runs the live agent resolution walkthrough
+```
+
+`update_model.py` prints the tool list before/after — you should see it grow from
+5 generic tools to ~28 covering all five entities plus relationship traversal.
+
+## Files
+
+| File | Purpose |
+|---|---|
+| `models.py` | `ContextModel`/`ContextField`/`ContextRelationship` definitions for the 5 entities |
+| `update_model.py` | Pushes `models.py` to the live surface via the admin API |
+| `seed_data.py` | Loads sample data via `UnifiedClient.import_data` |
+| `demo_agent_flow.py` | Runs the agent-key-only resolution walkthrough |
+| `docs/specs/payment-failure-context-retriever-demo.md` | Full spec, including live test results and the one thing that didn't work as documented |
