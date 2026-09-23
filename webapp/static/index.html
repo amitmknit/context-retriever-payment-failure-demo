@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en" data-theme="light2">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Redis Context Retriever + Agent Memory — Payment Failure Resolution</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23ff4438'/%3E%3Ctext x='16' y='23' font-family='sans-serif' font-size='20' font-weight='700' fill='white' text-anchor='middle'%3ER%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+
+<header class="appbar">
+  <div class="brand">
+    <div class="brand-mark" aria-hidden="true">R</div>
+    <div>
+      <div class="brand-title">Context Retriever + Agent Memory</div>
+      <div class="brand-sub">Payment failure resolution — live demo</div>
+    </div>
+  </div>
+  <div class="appbar-spacer"></div>
+  <div class="appbar-meta">
+    <span>Surface</span>
+    <span class="mono" id="surfaceName">—</span>
+  </div>
+  <button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle dark mode">Dark</button>
+</header>
+
+<div class="midbar" id="healthBar" role="status" aria-live="polite">
+  <span class="health is-pending" id="healthRedis">
+    <span class="dot"></span><span class="label">Redis</span><span class="detail">checking…</span>
+  </span>
+  <span class="health is-pending" id="healthCtx">
+    <span class="dot"></span><span class="label">Context Retriever</span><span class="detail">checking…</span>
+  </span>
+  <span class="health is-pending" id="healthMem">
+    <span class="dot"></span><span class="label">Agent Memory</span><span class="detail">checking…</span>
+  </span>
+  <button class="btn is-sm" id="refreshHealth" type="button">Re-check</button>
+</div>
+
+<div class="layout">
+  <nav class="sidebar" aria-label="Demo sections">
+    <div class="nav-group-label">Walkthrough</div>
+    <button class="nav-item" data-section="overview" aria-current="true"><span class="step-num">1</span> Overview</button>
+    <button class="nav-item" data-section="model"><span class="step-num">2</span> Entity model</button>
+    <button class="nav-item" data-section="resolution"><span class="step-num">3</span> Resolution</button>
+    <button class="nav-item" data-section="capabilities"><span class="step-num">4</span> Capabilities</button>
+    <button class="nav-item" data-section="memory"><span class="step-num">5</span> Memory</button>
+    <button class="nav-item" data-section="governance"><span class="step-num">6</span> Governance</button>
+  </nav>
+
+  <main class="content">
+
+    <!-- ============ 1. OVERVIEW ============ -->
+    <section class="section" id="section-overview">
+      <div class="section-head">
+        <h1>What this demo shows</h1>
+        <p>
+          Two Redis products working together on one problem. <strong>Context Retriever</strong> turns a
+          data model over Redis-resident business data into a governed set of MCP tools an agent calls at
+          runtime — no SQL, no direct database access. <strong>Agent Memory</strong> gives that agent
+          conversation continuity and durable recall about a customer across sessions.
+        </p>
+      </div>
+
+      <div class="panel">
+        <h2>Live environment</h2>
+        <p class="panel-sub">Every number below is read from the live services, not hard-coded.</p>
+        <div class="tiles" id="overviewTiles">
+          <div class="tile"><div class="tile-value skeleton" style="width:6rem"></div><div class="tile-label">Entities modeled</div></div>
+          <div class="tile"><div class="tile-value skeleton" style="width:6rem"></div><div class="tile-label">Generated MCP tools</div></div>
+          <div class="tile"><div class="tile-value skeleton" style="width:6rem"></div><div class="tile-label">Declared relationships</div></div>
+          <div class="tile"><div class="tile-value skeleton" style="width:6rem"></div><div class="tile-label">Keys in Redis</div></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>How the pieces fit</h2>
+        <p class="panel-sub">
+          The agent never talks to Redis directly. It calls generated tools over MCP; Context Retriever
+          executes the query against Redis. Agent Memory is a separate service the agent also calls.
+        </p>
+        <div class="arch">
+          <div class="arch-row">
+            <div class="arch-box is-agent">
+              <h3>Agent / application</h3>
+              <p>Calls named tools with named arguments. Holds an agent key. Knows nothing about your schema.</p>
+            </div>
+          </div>
+          <div class="arch-flow">▼ &nbsp; MCP (JSON-RPC over HTTPS, X-API-Key) &nbsp; ▼</div>
+          <div class="arch-row">
+            <div class="arch-box">
+              <h3>Context Retriever service</h3>
+              <p>Stores the entity model. Auto-generates the tool surface from it. Executes queries against Redis.</p>
+            </div>
+            <div class="arch-box is-memory">
+              <h3>Agent Memory service</h3>
+              <p>Session (short-term) memory per conversation, plus long-term memory searchable across sessions.</p>
+            </div>
+          </div>
+          <div class="arch-flow">▼ &nbsp; both backed by Redis &nbsp; ▼</div>
+          <div class="arch-row">
+            <div class="arch-box is-redis">
+              <h3>Redis</h3>
+              <p>Your business data as RedisJSON documents at declared key templates, plus the memory store.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>One Redis behind both products</h2>
+        <p class="panel-sub">
+          Live keyspace breakdown. The business entities sit at the key templates declared in the model;
+          the Agent Memory store lives in the same database under its own namespace.
+        </p>
+        <div id="keyspaceResult"><div class="skeleton"></div><div class="skeleton"></div></div>
+      </div>
+
+      <div class="banner is-informative">
+        <div>
+          <p class="banner-title">Nothing here is mocked</p>
+          <p>
+            Each panel calls the real service when you interact with it, and shows the actual request and
+            response. Where a documented capability did not behave as advertised in our testing, this demo
+            says so rather than hiding it — see <strong>Governance</strong>.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 2. ENTITY MODEL ============ -->
+    <section class="section" id="section-model" hidden>
+      <div class="section-head">
+        <h1>The entity model</h1>
+        <p>
+          Read live from the deployed surface. This is the only hand-authored artifact in the system —
+          everything in <em>Capabilities</em> was generated from it. Select a row to inspect its fields
+          and the actual Redis document behind it.
+        </p>
+      </div>
+
+      <div class="panel">
+        <h2>Entities</h2>
+        <p class="panel-sub">5 entities, 7 declared relationships. Click any row to inspect.</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Entity</th>
+                <th>Redis key template</th>
+                <th>Fields</th>
+                <th>Relationships</th>
+              </tr>
+            </thead>
+            <tbody id="entityRows">
+              <tr><td colspan="4"><div class="skeleton"></div><div class="skeleton"></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Generated tool surface</h2>
+        <p class="panel-sub">Grouped by verb. Zero lines of hand-written tool code produced any of these.</p>
+        <div id="toolGroups"><div class="skeleton"></div><div class="skeleton"></div></div>
+      </div>
+
+      <div class="banner is-attention">
+        <div>
+          <p class="banner-title">Relationships are not inferred from field names</p>
+          <p>
+            A tag field named <code class="mono">customer_id</code> does <em>not</em> auto-link to
+            <code class="mono">Customer</code>. We tested this: a model relying on naming convention alone
+            exported zero relationships. Each one must be declared explicitly with
+            <code class="mono">ContextRelationship(target=…, source_field=…)</code>.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 3. RESOLUTION ============ -->
+    <section class="section" id="section-resolution" hidden>
+      <div class="section-head">
+        <h1>Resolving a real payment failure</h1>
+        <p>
+          The agent is given one question and only the generated tools. Each step below is a real tool
+          call with its real response, and is recorded to session memory as it happens.
+        </p>
+      </div>
+
+      <div class="prompt-bar">
+        <div class="who">Prompt</div>
+        <div class="what" id="resolutionPrompt">—</div>
+      </div>
+
+      <div class="btn-row" style="margin-bottom: var(--sp-4)">
+        <button class="btn is-primary" id="runResolution" type="button">Run resolution</button>
+        <button class="btn" id="resetResolution" type="button">Reset</button>
+        <span class="inline-note" id="resolutionStatus"></span>
+      </div>
+
+      <div class="resolve-grid">
+        <div>
+          <div id="stepList">
+            <div class="empty">Press <strong>Run resolution</strong> to start. Steps appear one at a time.</div>
+          </div>
+          <div id="finalAnswerWrap"></div>
+        </div>
+
+        <div class="panel" style="margin: 0">
+          <h2>Session memory</h2>
+          <p class="panel-sub">Short-term. Written turn by turn, retrievable in order.</p>
+          <div class="kv" style="margin-bottom: var(--sp-3)">
+            <dt>session_id</dt>
+            <dd id="sessionIdLabel">—</dd>
+          </div>
+          <div class="transcript" id="liveTranscript">
+            <div class="empty" style="padding: var(--sp-4)">No turns recorded yet.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 4. CAPABILITIES ============ -->
+    <section class="section" id="section-capabilities" hidden>
+      <div class="section-head">
+        <h1>Capability tour</h1>
+        <p>
+          One class of generated tool per row. Run any of them against live data — the request and the
+          real response are shown side by side.
+        </p>
+      </div>
+
+      <div class="panel">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Capability</th>
+                <th>Generated tool</th>
+                <th>What it demonstrates</th>
+                <th style="width: 10rem"></th>
+              </tr>
+            </thead>
+            <tbody id="capabilityRows">
+              <tr><td colspan="4"><div class="skeleton"></div><div class="skeleton"></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="capabilityResult"></div>
+    </section>
+
+    <!-- ============ 5. MEMORY ============ -->
+    <section class="section" id="section-memory" hidden>
+      <div class="section-head">
+        <h1>Agent Memory: short-term and long-term</h1>
+        <p>
+          Context Retriever answers “what is true right now in the structured data.” Agent Memory answers
+          “what have we already learned about this conversation, and this customer, over time.”
+        </p>
+      </div>
+
+      <div class="panel">
+        <h2>Long-term recall</h2>
+        <p class="panel-sub">
+          Semantic search over durable facts about this customer. The similarity threshold is exposed on
+          purpose — drag it to 0.7 and watch the results disappear.
+        </p>
+        <div class="slider-row" style="margin-bottom: var(--sp-3)">
+          <label class="field-label" for="recallQuery">Query</label>
+          <input type="text" id="recallQuery" value="payment card problems">
+          <label class="field-label" for="threshold">Similarity threshold</label>
+          <input type="range" id="threshold" min="0" max="0.95" step="0.05" value="0.5">
+          <span class="mono" id="thresholdValue">0.50</span>
+          <button class="btn is-primary is-sm" id="runRecall" type="button">Recall</button>
+        </div>
+        <div id="recallResult">
+          <div class="empty">Press <strong>Recall</strong> to search long-term memory.</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Everything stored about this customer</h2>
+        <p class="panel-sub">
+          Structured-filter browse, no vector ranking. This is where background promotion volume becomes
+          visible: facts we wrote deliberately vs. facts the service extracted from conversation on its own.
+        </p>
+        <div class="btn-row" style="margin-bottom: var(--sp-3)">
+          <button class="btn" id="runBrowse" type="button">Browse memory store</button>
+          <span class="inline-note" id="browseSummary"></span>
+        </div>
+        <div id="browseResult">
+          <div class="empty">Not loaded.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 6. GOVERNANCE ============ -->
+    <section class="section" id="section-governance" hidden>
+      <div class="section-head">
+        <h1>Governance — and what we could not confirm</h1>
+        <p>
+          The access model as designed, plus the findings from testing it live. This section exists because
+          a governance claim that has not been verified against the real service is a claim, not a control.
+        </p>
+      </div>
+
+      <div class="panel">
+        <h2>Two key types</h2>
+        <div class="split">
+          <div class="arch-box">
+            <h3>Admin key</h3>
+            <p>Provisions. Creates and updates the entity model on a surface. Should never be held by an agent.</p>
+          </div>
+          <div class="arch-box">
+            <h3>Agent key</h3>
+            <p>Invokes only tools that already exist. Cannot change the model. This is what the demo's agent holds.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="banner is-danger">
+        <div>
+          <p class="banner-title">Access-tag enforcement did not filter results in our testing</p>
+          <p>
+            We created a second agent key scoped with <code class="mono">access_tags={"tier": ["standard"]}</code>
+            and queried the enterprise-tier customer with it — directly by ID and via
+            <code class="mono">filter_customer</code>. Both calls returned the restricted record, unfiltered.
+            On this preview build, in this test, access tags did not act as a data boundary. Treat it as
+            unverified until you have tested it in your own deployment.
+          </p>
+        </div>
+      </div>
+
+      <div class="banner is-attention">
+        <div>
+          <p class="banner-title">Background promotion is aggressive</p>
+          <p>
+            A single five-turn conversation produced <strong>42</strong> auto-extracted long-term memories,
+            on top of the two we wrote deliberately — sometimes near-duplicates across promotion windows.
+            Plan namespace and topic discipline before this reaches production volume. See
+            <strong>Memory → Browse memory store</strong> for the live count.
+          </p>
+        </div>
+      </div>
+
+      <div class="banner is-attention">
+        <div>
+          <p class="banner-title">The documented similarity threshold returned nothing</p>
+          <p>
+            The Agent Memory docs suggest starting at <code class="mono">0.7</code>. Against this store's
+            real embeddings, 0.7 returned zero results for a plain-language query while 0.5 returned the
+            expected records. Tune per workload; do not demo on the documented default untested.
+          </p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- drawer -->
+<div class="drawer-backdrop" id="drawerBackdrop" data-open="false"></div>
+<aside class="drawer" id="drawer" data-open="false" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+  <div class="drawer-head">
+    <div>
+      <h2 id="drawerTitle">—</h2>
+      <div class="drawer-sub" id="drawerSub"></div>
+    </div>
+    <button class="drawer-close" id="drawerClose" type="button" aria-label="Close">&times;</button>
+  </div>
+  <div class="drawer-body" id="drawerBody"></div>
+</aside>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

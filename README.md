@@ -85,6 +85,23 @@ git-ignored. If any of these were ever pasted into a chat/log, rotate them.
 `update_model.py` prints the tool list before/after — you should see it grow from
 5 generic tools to ~28 covering all five entities plus relationship traversal.
 
+## The web UI (recommended for customer demos)
+
+```bash
+.venv/bin/python3 -m uvicorn webapp.server:app --port 8800
+```
+Then open <http://127.0.0.1:8800>.
+
+A Redis-branded product UI that presents the whole demo without a terminal —
+six sections: live environment overview, the entity model (with an inspector
+that shows the real RedisJSON document behind each entity), the resolution
+walkthrough with real tool calls streaming in beside a live session-memory
+transcript, a capability tour, the memory panels, and governance.
+
+Credentials stay server-side; the browser only ever receives data. Every
+number and response is a live service call — there are no fixtures. Light and
+dark themes both supported.
+
 ## Presenting this to a customer
 
 See [`RUNBOOK.md`](RUNBOOK.md) for the exact pre-flight checks, talk track, and
@@ -101,6 +118,8 @@ governance finding to disclose rather than demo as working.
 | `seed_data.py` | Loads sample data via `UnifiedClient.import_data` |
 | `demo_agent_flow.py` | Runs the agent-key-only resolution walkthrough |
 | `capability_tour.py` | Runs each generated tool class individually for live demos |
+| `webapp/server.py` | FastAPI backend for the web UI — proxies to Context Retriever, Agent Memory, and Redis |
+| `webapp/static/` | The customer-facing UI (Redis product-UI styling, light + dark) |
 | `agent_memory_helpers.py` | Thin wrappers over `redis-agent-memory`: session turns, long-term facts, recall |
 | `demo_agent_flow_with_memory.py` | Same resolution flow, plus session continuity and cross-session recall via Agent Memory |
 | `RUNBOOK.md` | Customer-facing demo script: pre-flight, talk track, teardown |

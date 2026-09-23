@@ -1,10 +1,39 @@
 # Customer Demo Runbook: Redis Context Retriever + Agent Memory — Payment Failure Resolution
 
-Presented as a mix of terminal (agent tool calls, narrated) and the deck
+Two ways to run this. **Default to the web UI** — it's the customer-facing
+surface and covers the whole story without a terminal. The CLI scripts remain
+for a developer audience that wants to see the raw calls, and for pre-flight.
+
+Everything either surface shows is live against a real Redis Cloud database,
+a real Context Retriever service, and a real Agent Memory service — say so
+explicitly; it's the differentiator from a slide-only pitch. The deck
 ([`Context-Retriever-Payment-Failure-Demo.pptx`](Context-Retriever-Payment-Failure-Demo.pptx))
-for the framing/architecture slides. Everything the terminal shows is live
-against a real Redis Cloud database and a real Context Retriever service —
-say so explicitly; it's the differentiator from a slide-only pitch.
+still carries the framing if you want slides up front.
+
+## 0. Web UI (the customer-facing path)
+
+```bash
+cd ~/Claude-Code/demo/context-retriever-payment-failure
+.venv/bin/python3 -m uvicorn webapp.server:app --port 8800
+```
+
+Open <http://127.0.0.1:8800> and present the six sections left to right. Best
+at 1400px+ — the resolution view goes two-column (tool calls left, live
+session-memory transcript right). Both light and dark themes work; pick
+whichever reads better on the room's projector.
+
+| Section | What to do live | The line to land |
+|---|---|---|
+| **Overview** | Point at the health pills and the tiles — all read live. Scroll to the keyspace table. | "Both products, one Redis. Your entities at the key templates you declared, the memory store in the same database." |
+| **Entity model** | Click a row → the inspector opens with fields, index types, relationships, and the actual RedisJSON document. | "This model is the only thing we hand-authored. Everything in the next tab was generated from it." |
+| **Resolution** | Press **Run resolution**. Let the five steps land one at a time; watch the transcript build on the right. | "Every one of those was a tool call the agent chose and chained. None of that branching is hand-written." |
+| **Capabilities** | Run **Cross-entity join** first, then whichever else they ask about. | "One call traverses a declared relationship — a join, with no SQL and no schema knowledge in the agent." |
+| **Memory** | Recall at 0.5, then drag the threshold to 0.7 and press Recall again. Then **Browse memory store**. | "Same query, same data, nothing returned — that's threshold calibration, and it's why we test rather than trust the default." |
+| **Governance** | Read the two red/amber banners rather than glossing past them. | "We test every claim ourselves before we put it in front of you. This one didn't hold up yet." |
+
+If a panel errors mid-demo, it renders the real error in a red banner rather
+than failing silently — read it out and move on; the other sections are
+independent.
 
 ## 1. Pre-flight (do this before the customer joins)
 
@@ -32,7 +61,14 @@ Do a silent dry-run of the centerpiece flow so you're not debugging live:
 .venv/bin/python3 demo_agent_flow.py
 ```
 
-## 2. Suggested talk track
+And if you're presenting through the UI, load it once and confirm all three
+health pills are green before the customer joins:
+
+```bash
+curl -s localhost:8800/api/health | python3 -m json.tool
+```
+
+## 2. Suggested talk track (terminal path)
 
 ### A. Frame the problem (deck, slides 2–3)
 
