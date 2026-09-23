@@ -66,10 +66,18 @@ git-ignored. If any of these were ever pasted into a chat/log, rotate them.
 .venv/bin/python3 update_model.py     # extends the surface's entity model (idempotent: safe to re-run)
 .venv/bin/python3 seed_data.py        # imports ~22 sample records via UnifiedClient.import_data
 .venv/bin/python3 demo_agent_flow.py  # runs the live agent resolution walkthrough
+.venv/bin/python3 capability_tour.py  # optional: exercises each tool class individually (lookup/filter/search/count/summarize/expand)
 ```
 
 `update_model.py` prints the tool list before/after — you should see it grow from
 5 generic tools to ~28 covering all five entities plus relationship traversal.
+
+## Presenting this to a customer
+
+See [`RUNBOOK.md`](RUNBOOK.md) for the exact pre-flight checks, talk track, and
+live commands to run per capability (point lookup, filter, text search,
+count/summarize, and the relationship-traversal "join") — including the one
+governance finding to disclose rather than demo as working.
 
 ## Files
 
@@ -79,4 +87,6 @@ git-ignored. If any of these were ever pasted into a chat/log, rotate them.
 | `update_model.py` | Pushes `models.py` to the live surface via the admin API |
 | `seed_data.py` | Loads sample data via `UnifiedClient.import_data` |
 | `demo_agent_flow.py` | Runs the agent-key-only resolution walkthrough |
+| `capability_tour.py` | Runs each generated tool class individually for live demos |
+| `RUNBOOK.md` | Customer-facing demo script: pre-flight, talk track, teardown |
 | `docs/specs/payment-failure-context-retriever-demo.md` | Full spec, including live test results and the one thing that didn't work as documented |

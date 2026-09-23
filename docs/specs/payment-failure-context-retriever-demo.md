@@ -49,17 +49,22 @@ Confirmed by reading the live package README and probing the live MCP endpoint:
   directly to Redis unless you intend to manage the full storage/index contract
   yourself. This demo uses `import_data`, not raw `HSET`.
 
-**Inferred, not documented** — relationships are visibly a first-class concept (the
-live `expand_results`/`intersect_results` tools carry an `expand_to`/`relationship`
-parameter), but the README's `ContextModel` example never shows a relationship
-declaration. Two explanations fit the evidence: (a) Context Retriever infers a
-relationship automatically when a `tag`-indexed field's name matches
-`<related_entity_lower>_id` and that entity's key component, or (b) relationships are
-declared in the `data_model` dict passed to `create_context_surface`/
-`update_context_surface` outside the per-class fields, separate from `ContextModel`.
-This demo's field names follow convention (a) (`customer_id`, `transaction_id`,
-`payment_method_id`) so it works either way once tested live — **this is the one part
-of the plan that needs confirming against the real API response**, not assumed as fact.
+**Resolved (updated after initial drafting — see acceptance criteria below for the
+correction in full)**: relationships are declared explicitly with
+`ContextRelationship(description=..., target=..., source_field=...)`, a class attribute
+alongside `ContextField`s. FK-name matching alone (a field named `customer_id`) does
+**not** create a relationship — confirmed by exporting a model with only naming
+convention in place and getting zero relationships back, then confirmed correct by
+matching the bundled `context_surfaces/examples/reddish_models.py` reference file.
+
+**Also resolved, from the capability-tour follow-up**: `count_*` and `summarize_*`
+tools are aggregation-only — they take `function` (+ `field` for `summarize_*`, +
+optional `group_by`), not `tag_conditions`/`numeric_conditions` like `filter_*`. They
+do not support filtering before aggregating in this API version; a customer wanting a
+count over a filtered subset would need `filter_*` and count client-side, or ask
+Context Retriever for that combination. `expand_results` returns `{entity, ids}`, not
+full related-entity records — a real follow-up `get_*_by_id` call is needed to get
+the record body, not a cosmetic detail to smooth over in a demo.
 
 ## Data model
 
