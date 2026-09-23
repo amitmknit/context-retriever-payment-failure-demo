@@ -12,10 +12,55 @@ still carries the framing if you want slides up front.
 
 ## 0. Web UI (the customer-facing path)
 
+### Start
+
 ```bash
 cd ~/Claude-Code/demo/context-retriever-payment-failure
 .venv/bin/python3 -m uvicorn webapp.server:app --port 8800
 ```
+
+Leave that terminal running — it *is* the server. Open
+<http://127.0.0.1:8800>, confirm all three health pills are green, and you're
+ready. To run it in the background instead, so you get your prompt back:
+
+```bash
+.venv/bin/python3 -m uvicorn webapp.server:app --port 8800 > /tmp/demo-ui.log 2>&1 &
+```
+
+### Stop
+
+`Ctrl-C` in that terminal. If you backgrounded it, or lost the terminal:
+
+```bash
+pkill -f "uvicorn webapp.server"
+```
+
+Confirm it's down (should print nothing / connection refused):
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" localhost:8800/api/health || echo "stopped"
+```
+
+### Restart after a code change
+
+The server does not auto-reload unless you ask it to. For a demo, restart
+cleanly:
+
+```bash
+pkill -f "uvicorn webapp.server"; sleep 1
+.venv/bin/python3 -m uvicorn webapp.server:app --port 8800
+```
+
+Add `--reload` while you're editing; drop it before presenting (the reloader
+logs noisily and can restart mid-demo).
+
+### Nothing to tear down in the cloud
+
+Stopping the UI stops nothing in Redis Cloud — the database, the Context
+Retriever surface and the Agent Memory store are all persistent and keep
+running at no interaction cost. Your data survives; next demo starts warm.
+
+### Present it
 
 Open <http://127.0.0.1:8800> and present the six sections left to right. Best
 at 1400px+ — the resolution view goes two-column (tool calls left, live
@@ -26,7 +71,7 @@ whichever reads better on the room's projector.
 |---|---|---|
 | **Overview** | Point at the health pills and the tiles — all read live. Scroll to the keyspace table. | "Both products, one Redis. Your entities at the key templates you declared, the memory store in the same database." |
 | **Entity model** | Click a row → the inspector opens with fields, index types, relationships, and the actual RedisJSON document. | "This model is the only thing we hand-authored. Everything in the next tab was generated from it." |
-| **Resolution** | Press **Run resolution**. Let the five steps land one at a time; watch the transcript build on the right. | "Every one of those was a tool call the agent chose and chained. None of that branching is hand-written." |
+| **Resolution** | Press **Run resolution**. Let the five steps land one at a time; watch the transcript build on the right. | "Every tool it called was generated from the model — nobody hand-built a tool or wrote a query." *(The call order is scripted in this build — see the note below; don't claim a model chose it.)* |
 | **Capabilities** | Run **Cross-entity join** first, then whichever else they ask about. | "One call traverses a declared relationship — a join, with no SQL and no schema knowledge in the agent." |
 | **Memory** | Recall at 0.5, then drag the threshold to 0.7 and press Recall again. Then **Browse memory store**. | "Same query, same data, nothing returned — that's threshold calibration, and it's why we test rather than trust the default." |
 | **Governance** | Read the two red/amber banners rather than glossing past them. | "We test every claim ourselves before we put it in front of you. This one didn't hold up yet." |
@@ -120,9 +165,17 @@ Narrate each as you go:
 
 Narrate the prompt first, then let each step print: identify the customer,
 find their transactions, isolate the failure, pattern-check against other
-customers, check for a duplicate ticket, then land the answer. Emphasize:
-every one of those is a tool call the agent chose and chained itself — none
-of that branching logic is hand-written.
+customers, check for a duplicate ticket, then land the answer.
+
+**Be precise about what's generated vs. scripted** — an engineer will ask.
+Every *tool* it calls was generated from the entity model; nobody hand-wrote a
+tool, a query, or a schema mapping. The *order* of the five calls is a fixed
+list in the demo code, and the narration and closing answer are written text —
+no model chose or wrote any of it. Claiming "the agent chose and chained these
+calls" is overstating this build. With a real LLM driving, the tool surface
+would be identical; only the chooser changes. There is still an LLM in the
+picture, though — inside Agent Memory, doing extraction and summarisation on
+promotion (see section F).
 
 ### F. Add memory — same conversation, now with continuity and recall
 
