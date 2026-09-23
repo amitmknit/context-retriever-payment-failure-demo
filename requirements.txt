@@ -1,2 +1,3 @@
 redis-context-retriever>=0.0.6
+redis-agent-memory>=0.4.1
 python-dotenv>=1.0

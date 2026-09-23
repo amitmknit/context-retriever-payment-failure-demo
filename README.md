@@ -1,10 +1,14 @@
-# Payment-Failure Resolution Demo — Redis Context Retriever
+# Payment-Failure Resolution Demo — Redis Context Retriever + Agent Memory
 
-An end-to-end, **live-tested** demo of [Redis Context Retriever](https://redis.io/docs/latest/develop/ai/context-engine/context-retriever/):
-model a payment-failure domain over Redis-resident data, let Context Retriever
-auto-generate the MCP tool surface, and have an agent resolve *"Customer 1042's
-payment just failed — what happened and what should we do?"* using only those
-generated tools — no SQL, no direct Redis access from the agent.
+An end-to-end, **live-tested** demo of [Redis Context Retriever](https://redis.io/docs/latest/develop/ai/context-engine/context-retriever/)
+and [Redis Agent Memory](https://redis.io/docs/latest/develop/ai/context-engine/agent-memory/)
+together: model a payment-failure domain over Redis-resident data, let
+Context Retriever auto-generate the MCP tool surface, and have an agent
+resolve *"Customer 1042's payment just failed — what happened and what
+should we do?"* using only those generated tools — no SQL, no direct Redis
+access from the agent. Agent Memory then layers conversation continuity
+(short-term/session memory) and durable, cross-session recall about the
+customer (long-term memory) on top of that same resolution.
 
 Full design, field/index tables, and — importantly — what was actually verified
 live vs. assumed: [`docs/specs/payment-failure-context-retriever-demo.md`](docs/specs/payment-failure-context-retriever-demo.md).
@@ -35,6 +39,10 @@ filter — see the spec's governance section).
   CLI login step.
 - An **agent key** for the surface (`ctxctl agent create --name <name> --surface-id <id>`
   or via the console's Agent Keys tab).
+- A **Redis Cloud Agent Memory service** (separate from Context Retriever) —
+  create one at Redis Cloud console → **Agent Memory** → New service, then
+  copy its **Server URL**, **Store ID**, and **Store API key** from the
+  Configuration page.
 
 ## Setup
 
@@ -55,6 +63,10 @@ CTX_MCP_ENDPOINT=<service MCP URL, e.g. https://gcp-us-east4.context-surfaces.re
 CTX_AGENT_KEY=<cs_agent_...>
 CTX_ADMIN_KEY=<cs_admin_...>
 CTX_SURFACE_ID=<surface id — printed by update_model.py, or from the console URL>
+
+AGENT_MEMORY_BASE_URL=<e.g. https://gcp-us-east4.memory.redis.io>
+AGENT_MEMORY_STORE_ID=<32-char store id>
+AGENT_MEMORY_API_KEY=<store API key>
 ```
 
 **Never commit `.env` or paste these values anywhere outside it** — `.env` is
@@ -67,6 +79,7 @@ git-ignored. If any of these were ever pasted into a chat/log, rotate them.
 .venv/bin/python3 seed_data.py        # imports ~22 sample records via UnifiedClient.import_data
 .venv/bin/python3 demo_agent_flow.py  # runs the live agent resolution walkthrough
 .venv/bin/python3 capability_tour.py  # optional: exercises each tool class individually (lookup/filter/search/count/summarize/expand)
+.venv/bin/python3 demo_agent_flow_with_memory.py  # optional: layers session + long-term memory on top of the resolution flow
 ```
 
 `update_model.py` prints the tool list before/after — you should see it grow from
@@ -88,5 +101,7 @@ governance finding to disclose rather than demo as working.
 | `seed_data.py` | Loads sample data via `UnifiedClient.import_data` |
 | `demo_agent_flow.py` | Runs the agent-key-only resolution walkthrough |
 | `capability_tour.py` | Runs each generated tool class individually for live demos |
+| `agent_memory_helpers.py` | Thin wrappers over `redis-agent-memory`: session turns, long-term facts, recall |
+| `demo_agent_flow_with_memory.py` | Same resolution flow, plus session continuity and cross-session recall via Agent Memory |
 | `RUNBOOK.md` | Customer-facing demo script: pre-flight, talk track, teardown |
 | `docs/specs/payment-failure-context-retriever-demo.md` | Full spec, including live test results and the one thing that didn't work as documented |

@@ -212,3 +212,110 @@ Prompt: *"Customer 1042's payment just failed — what happened and what should 
 
 Every step above is a generated MCP tool call, not hand-written code — the entity
 model produced all of it.
+
+## Extension: Redis Agent Memory (short-term + long-term)
+
+Context Retriever answers "what is true right now, in this business's
+structured data" — it has no concept of a conversation or of a customer's
+history. Redis Agent Memory is the complementary product for that: session
+(short-term) memory for a single conversation, and long-term memory for
+durable, cross-session facts about a customer. Source:
+[Agent Memory docs](https://redis.io/docs/latest/develop/ai/context-engine/agent-memory/),
+the `redis-agent-memory` PyPI package, and the `iris-development` skill's
+reference files (read in full before implementing — see below for what each
+call actually does, confirmed against the SDK, not assumed).
+
+### Why it's relevant here, specifically
+
+The scene 1 walkthrough above is stateless — every run re-derives the
+diagnosis from scratch via Context Retriever. A real support agent needs two
+more things Context Retriever doesn't provide:
+
+1. **Continuity within one conversation** — if the customer asks a follow-up,
+   or a human agent takes over, the conversation so far needs to be
+   retrievable, in order, without replaying tool calls.
+2. **Recall across conversations** — the second time customer 1042 has a
+   card_expired failure (or calls about something unrelated), the agent
+   should already know this is a recurring pattern, without re-querying and
+   re-reasoning over Context Retriever from zero every time.
+
+### Design
+
+- **Session memory** (`add_session_event`): every turn of the scene-1
+  conversation — the customer's opening message and each of the agent's
+  intermediate findings — is appended as an ordered event under one
+  `session_id`. Cheap writes, no LLM cost on the write path.
+- **Long-term memory** (`bulk_create_long_term_memories`): written directly,
+  **not** via the background LLM-extraction/promotion path. Context Retriever
+  already gave us a structured, ground-truth fact (recurring `card_expired`
+  on `pm_5`, via `stripe`) — there's nothing for an LLM to extract that we
+  don't already know exactly. One `SEMANTIC` fact (the recurring pattern) and
+  one `EPISODIC` fact (this specific resolution, dated) are written, both
+  scoped with `owner_id=customer-1042` and `namespace=payment-issues`.
+- **Recall** (`search_long_term_memory`): a later, brand-new session queries
+  long-term memory filtered by `owner_id` before ever touching Context
+  Retriever again — demonstrating that the durable facts survive independent
+  of the original session's TTL.
+
+### Implementation
+
+- [`agent_memory_helpers.py`](../../agent_memory_helpers.py) — thin wrappers:
+  `record_turn`, `remember_recurring_failure`, `remember_resolution`,
+  `recall_customer_history`.
+- [`demo_agent_flow_with_memory.py`](../../demo_agent_flow_with_memory.py) —
+  four scenes: (1) the original resolution flow, narrated turn-by-turn into
+  session memory; (2) writing the durable facts directly to long-term memory;
+  (3) rebuilding scene 1's transcript from session memory (`get_session_memory`)
+  to prove continuity; (4) a simulated later session recalling customer
+  1042's history before querying anything else.
+
+### Run live — everything below is verified, not assumed
+
+Ran against a real Redis Cloud Agent Memory service (separate from the
+Context Retriever service above — its own `storeId` and store API key,
+provisioned via the Cloud console). The installed SDK is
+`redis-agent-memory==0.4.1`; several things differed from the `iris-development`
+skill's reference docs, corrected here rather than papered over:
+
+- **`models.MemoryType` does not exist in this SDK version.** `memory_type` is
+  a plain `Optional[str]` field — pass `"semantic"` / `"episodic"` directly,
+  not an enum member. (`models.MessageRole` and `models.FilterConjunction` *are*
+  real enums, confirmed by inspecting `__members__`.)
+- **Memory IDs are alphanumeric + hyphens only** — `_` fails with a 400
+  (`ID: must contain only alphanumeric characters (A-Z, a-z, 0-9) and hyphens (-)`).
+  A field like `card_expired` used verbatim in an ID breaks; `topics` values
+  don't have this restriction. `agent_memory_helpers.py`'s `_slug()` handles this.
+- **`search_long_term_memory_async` takes a single wrapped `request=` argument**
+  in this SDK version, not the flat keyword arguments (`text=`, `filter_=`, etc.)
+  shown in the skill doc's example — confirmed via `inspect.signature`. The
+  field names *inside* that request dict do match the doc.
+- **The search response field is `items`, not `memories`.** `SearchLongTermMemoryResponseContent`
+  has `items` and `next_page_token`; `res.memories` raises `AttributeError`.
+- **`similarity_threshold=0.7` (the doc's suggested starting point) returned
+  zero results** for a natural query ("payment card problems") against this
+  store's actual embeddings; `0.5` reliably returned the expected records.
+  Confirmed by sweeping `0.7 → 0.5 → 0.3 → 0.0` — 0.7 was the only threshold
+  that returned nothing. This isn't a bug, it's exactly the doc's own caveat
+  ("start at 0.7 and tune per workload") — but it means **do not demo with the
+  doc's suggested threshold untested against your own store's data.**
+- **A 5-turn session produced 42 auto-promoted long-term memories** — filtering
+  by `owner_id` alone (no text) surfaced them all. Promotion atomizes very
+  aggressively (e.g. "Customer 1042 is located in Madrid." and "Customer 1042
+  is named Sofia Moreno." as separate records, sometimes duplicated near-verbatim
+  across promotion windows). Worth disclosing to a customer sizing this for
+  production: promotion volume from ordinary conversation is not negligible,
+  and namespace/topic discipline (see `ltm-organize`) is not optional at scale.
+  The two facts written *directly* via `bulk_create_long_term_memories`
+  (bypassing promotion) landed as exactly 2 records, both fully under our IDs
+  and organization fields — as designed.
+- **Direct `bulk_create_long_term_memories` writes are retrievable by ID and by
+  structured filter immediately**, but were **not yet reachable via the
+  vector-similarity path** in the same window purely due to the threshold
+  issue above, not an indexing delay — confirmed by the filter-only browse
+  returning them right away while a high-threshold semantic search returned
+  nothing for the same records.
+
+See the live output captured by [`demo_agent_flow_with_memory.py`](../../demo_agent_flow_with_memory.py)
+for the full run: session turns recorded and rebuilt via `get_session_memory`,
+two durable facts written directly, and a simulated later session recalling
+them via `search_long_term_memory` at `similarity_threshold=0.5`.

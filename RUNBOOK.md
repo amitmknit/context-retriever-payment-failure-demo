@@ -1,4 +1,4 @@
-# Customer Demo Runbook: Redis Context Retriever — Payment Failure Resolution
+# Customer Demo Runbook: Redis Context Retriever + Agent Memory — Payment Failure Resolution
 
 Presented as a mix of terminal (agent tool calls, narrated) and the deck
 ([`Context-Retriever-Payment-Failure-Demo.pptx`](Context-Retriever-Payment-Failure-Demo.pptx))
@@ -88,7 +88,48 @@ customers, check for a duplicate ticket, then land the answer. Emphasize:
 every one of those is a tool call the agent chose and chained itself — none
 of that branching logic is hand-written.
 
-### F. Governance — show the design, disclose the finding
+### F. Add memory — same conversation, now with continuity and recall
+
+```bash
+.venv/bin/python3 demo_agent_flow_with_memory.py
+```
+
+This re-runs the scene-1 resolution, but narrates it: every turn (the
+customer's opening message, each of the agent's intermediate findings, the
+final answer) is written to **session memory** as it happens. Then it:
+
+1. **Rebuilds the transcript** from session memory alone — say: "if this
+   chat drops, or a human agent picks it up, nothing is lost — the whole
+   conversation is retrievable in order."
+2. **Writes durable facts to long-term memory directly** — the recurring
+   `card_expired` pattern and this specific resolution — skipping the
+   background LLM-extraction path entirely, because Context Retriever
+   already told us this fact structurally. Say: "we're not paying for an LLM
+   to re-discover what we already know."
+3. **Simulates the customer calling back later**, in a brand-new session,
+   and shows the agent recalling their history *before* querying Context
+   Retriever again. This is the moment to land: "next time this customer
+   calls — about this or anything else — the agent already knows this
+   history. Context Retriever gave us the fact once; Agent Memory makes it
+   durable."
+
+Two things worth mentioning live, both live findings, not slideware claims:
+- **Session memory also auto-promotes to long-term memory in the background** —
+  our one 5-turn conversation generated 42 auto-extracted memories on its own,
+  on top of the 2 we wrote directly. Say: "promotion is real, and it's
+  aggressive — worth planning namespace/topic discipline before this hits
+  production volume, not after."
+- **The similarity threshold in the docs (0.7) returned zero results** against
+  this store's real embeddings for a plain-language query; `0.5` worked. If a
+  customer asks why recall seems to miss things, that's the first knob to check
+  — not a sign the feature is broken.
+
+Frame the two products together plainly: **Context Retriever answers "what's
+true right now, in your structured data." Agent Memory answers "what have we
+already learned about this specific conversation, and this specific
+customer, over time."** Neither one does the other's job.
+
+### G. Governance — show the design, disclose the finding
 
 Show the two-key-type model (admin provisions, agent invokes) and the
 `access_tags` concept from the deck. **Do not demonstrate this live as if it
