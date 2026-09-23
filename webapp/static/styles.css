@@ -366,6 +366,10 @@ td.mono, th.mono { font-family: var(--font-code); font-size: 1.2rem; }
 .badge.is-episodic { border-color: var(--notice-border); background: var(--notice-soft); color: var(--notice); }
 .badge.is-direct { border-color: var(--success-border); background: var(--success-soft); color: var(--success); }
 .badge.is-promoted { border-color: var(--attention-border); background: var(--attention-soft); color: var(--attention); }
+/* session_summary_view records, and the "session summary" origin */
+.badge.is-session_summary_view,
+.badge.is-session-summary { border-color: var(--primary-border); background: var(--primary-soft); color: var(--primary); }
+.badge.is-message { border-color: var(--border-strong); background: var(--bg-sunken); color: var(--text-muted); }
 
 /* ---------------- buttons ---------------- */
 

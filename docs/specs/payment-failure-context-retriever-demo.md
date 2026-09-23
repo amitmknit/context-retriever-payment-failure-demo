@@ -315,6 +315,70 @@ skill's reference docs, corrected here rather than papered over:
   returning them right away while a high-threshold semantic search returned
   nothing for the same records.
 
+### Telling the two tiers apart in Redis (verified by keyspace inspection)
+
+Both tiers live in the same Redis database the entities do, and are trivially
+distinguishable three ways — all read live by `/api/memory/tiers`:
+
+| | Short-term (session memory) | Long-term memory |
+|---|---|---|
+| Key | `memory:<storeId>:session_memory:<sessionId>` | `memory:<storeId>:ltm:<memoryId>` |
+| Redis data type | `ReJSON-RL` (one JSON doc holding the ordered turns) | `hash` (fields + a `text_vector` binary embedding) |
+| TTL observed | ~82,000 s (**~23 h**), refreshed per event | ~31,532,000 s (**~365 d**) |
+
+The TTL gap is the honest way to explain the tiers to a customer: short-term is
+ephemeral working state, long-term is durable. Note they use *different Redis
+data types* — long-term records are hashes carrying a `text_vector` field,
+which is what makes them vector-searchable; session memory is a plain JSON
+document with no embedding.
+
+### Memory types: a per-store registry, not a fixed enum
+
+`memory_type` is typed `Optional[str]` in the SDK with no enum, and the server
+validates it against a **per-store registry**. Writing an unregistered value
+fails with a telling message:
+
+```
+memory type "procedural" is not registered on this store
+```
+
+Not "invalid" — *not registered on this store*. Probing established which are
+registered here; counting straight from the Redis hashes established which
+actually have records:
+
+| Type | Registered on this store | Records present |
+|---|---|---|
+| `semantic` | yes | 14 |
+| `episodic` | yes | 39 |
+| `session_summary_view` | yes | 10 |
+| `message` | yes (write accepted) | **0** |
+| `procedural` | **no** (400) | n/a |
+
+Two things worth carrying into a customer conversation:
+
+- **`session_summary_view` is excluded from search unless you ask for it.** A
+  search filtered only by `owner_id` returns 53; adding
+  `memory_type: {in_: [...]}` with the type listed returns 63. The 10 missing
+  records are the session summaries — and they are arguably the *most* useful
+  records in the store, because each is one coherent LLM-written narrative of a
+  whole conversation rather than a fragment. An agent relying on default recall
+  would never see them. `/api/memory/browse` now passes the explicit type list
+  for exactly this reason; before the fix it under-reported the store.
+- **`message` is registered but unused here.** Nothing in this demo writes it,
+  and this store's extraction strategy doesn't produce it. Don't claim the
+  demo shows all four types — it shows three.
+
+### `list_sessions` requires a filter
+
+A bare `list_sessions()` — as the skill doc's example shows — returns 400:
+
+```
+filter: a filter (filterOwnerId or namespaceRef) or includeAll=true is required
+```
+
+Pass `filter_owner_id=…` (or `include_all=True`). The response field is
+`items`, not `sessions` — the same `items` naming as the LTM search response.
+
 See the live output captured by [`demo_agent_flow_with_memory.py`](../../demo_agent_flow_with_memory.py)
 for the full run: session turns recorded and rebuilt via `get_session_memory`,
 two durable facts written directly, and a simulated later session recalling

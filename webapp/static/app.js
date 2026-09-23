@@ -573,6 +573,122 @@ async function runRecall() {
 }
 $("#runRecall").addEventListener("click", runRecall);
 
+async function loadTiers() {
+  const out = $("#tiersResult");
+  try {
+    const t = await api("/api/memory/tiers");
+    const wrap = el("div", "table-wrap");
+    const table = el("table");
+    const thead = el("thead");
+    const hrow = el("tr");
+    ["", "Short-term (session memory)", "Long-term memory"].forEach((h) => hrow.append(el("th", null, h)));
+    thead.append(hrow);
+    const tbody = el("tbody");
+    const rows = [
+      ["Key pattern", t.short_term.key_pattern, t.long_term.key_pattern],
+      ["Redis data type", t.short_term.redis_type || "—", t.long_term.redis_type || "—"],
+      ["Time to live", t.short_term.ttl_human || "—", t.long_term.ttl_human || "—"],
+      ["Keys right now", String(t.short_term.key_count), String(t.long_term.key_count)],
+    ];
+    rows.forEach(([label, a, b]) => {
+      const tr = el("tr");
+      tr.append(el("td", null, label));
+      tr.append(el("td", "mono", a));
+      tr.append(el("td", "mono", b));
+      tbody.append(tr);
+    });
+    table.append(thead, tbody);
+    wrap.append(table);
+    out.replaceChildren(wrap);
+  } catch (err) {
+    out.replaceChildren(el("div", "empty", `Could not read the tiers: ${err.message}`));
+  }
+}
+
+async function loadSessions() {
+  const btn = $("#loadSessions");
+  btn.disabled = true;
+  btn.classList.add("is-loading");
+  const out = $("#sessionsResult");
+  try {
+    const payload = await api("/api/memory/sessions");
+    $("#sessionsSummary").textContent = `${payload.sessions.length} session(s) in the store`;
+    if (!payload.sessions.length) {
+      out.replaceChildren(el("div", "empty", "No sessions yet — run the resolution first."));
+      return;
+    }
+    const wrap = el("div", "table-wrap");
+    const table = el("table");
+    const thead = el("thead");
+    const hrow = el("tr");
+    ["Session", "Redis type", "Expires in", ""].forEach((h) => hrow.append(el("th", null, h)));
+    thead.append(hrow);
+    const tbody = el("tbody");
+    payload.sessions.forEach((s) => {
+      const tr = el("tr");
+      const idTd = el("td", "mono cell-ellipsis", s.session_id);
+      idTd.title = s.redis_key;
+      tr.append(idTd);
+      tr.append(el("td", "mono", s.redis_type || "expired"));
+      tr.append(
+        el("td", "mono", s.ttl_seconds ? `${Math.round(s.ttl_seconds / 3600)}h` : "—"),
+      );
+      const actionTd = el("td");
+      const view = el("button", "btn is-sm", "View turns");
+      view.addEventListener("click", () => openSessionDrawer(s));
+      actionTd.append(view);
+      tr.append(actionTd);
+      tbody.append(tr);
+    });
+    table.append(thead, tbody);
+    wrap.append(table);
+    out.replaceChildren(wrap);
+  } catch (err) {
+    out.replaceChildren(el("div", "empty", `Could not list sessions: ${err.message}`));
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove("is-loading");
+  }
+}
+
+function openSessionDrawer(session) {
+  openDrawer("Session memory", session.session_id, (body) => {
+    const meta = el("dl", "kv");
+    [
+      ["Redis key", session.redis_key],
+      ["Redis type", session.redis_type || "expired"],
+      ["Expires in", session.ttl_seconds ? `${Math.round(session.ttl_seconds / 3600)} hours` : "—"],
+    ].forEach(([k, v]) => {
+      meta.append(el("dt", null, k), el("dd", null, v));
+    });
+    body.append(meta);
+
+    const status = el("div", "inline-note", "Loading turns…");
+    body.append(status);
+    api(`/api/memory/session/${encodeURIComponent(session.session_id)}`)
+      .then((data) => {
+        status.remove();
+        const head = el("div");
+        head.append(el("p", "code-label", `Turns (${data.events.length})`));
+        body.append(head);
+        const transcript = el("div", "transcript");
+        data.events.forEach((ev) => {
+          const isUser = String(ev.role).toUpperCase().includes("USER");
+          const node = el("div", `turn is-${isUser ? "user" : "assistant"}`);
+          const m = el("div", "turn-meta");
+          m.append(el("span", null, String(ev.role)), el("span", "mono", ev.actor_id));
+          node.append(m, el("div", "turn-text", ev.text));
+          transcript.append(node);
+        });
+        body.append(transcript);
+      })
+      .catch((err) => {
+        status.textContent = `Could not load turns: ${err.message}`;
+      });
+  });
+}
+$("#loadSessions").addEventListener("click", loadSessions);
+
 async function runBrowse() {
   const btn = $("#runBrowse");
   btn.disabled = true;
@@ -580,8 +696,12 @@ async function runBrowse() {
   const out = $("#browseResult");
   try {
     const payload = await api("/api/memory/browse");
+    const types = Object.entries(payload.by_type)
+      .map(([t, n]) => `${n} ${t}`)
+      .join(", ");
     $("#browseSummary").textContent =
-      `${payload.total} total — ${payload.direct_written_count} written deliberately, ${payload.auto_promoted_count} auto-promoted from conversation`;
+      `${payload.total} total — ${payload.direct_written_count} written deliberately, ` +
+      `${payload.auto_promoted_count} auto-promoted, ${payload.session_summary_count} session summaries  ·  ${types}`;
     const wrap = el("div", "table-wrap");
     const table = el("table");
     const thead = el("thead");
@@ -591,11 +711,12 @@ async function runBrowse() {
     const tbody = el("tbody");
     payload.memories.forEach((m) => {
       const tr = el("tr");
+      const slug = (s) => String(s || "").replace(/[^a-z0-9]+/gi, "-");
       const originTd = el("td");
-      originTd.append(el("span", `badge is-${m.origin}`, m.origin));
+      originTd.append(el("span", `badge is-${slug(m.origin)}`, m.origin));
       tr.append(originTd);
       const typeTd = el("td");
-      typeTd.append(el("span", `badge is-${m.memory_type}`, m.memory_type || "—"));
+      typeTd.append(el("span", `badge is-${slug(m.memory_type)}`, m.memory_type || "—"));
       tr.append(typeTd);
       tr.append(el("td", null, m.text));
       const idTd = el("td", "mono cell-ellipsis", m.id);
@@ -618,6 +739,9 @@ async function runBrowse() {
   }
 }
 $("#runBrowse").addEventListener("click", runBrowse);
+
+// The tiers panel is pure description of the keyspace -- load it eagerly.
+loadTiers();
 
 /* ------------------------------------------------ boot */
 

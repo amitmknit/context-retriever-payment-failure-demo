@@ -514,6 +514,12 @@ async def memory_recall(req: RecallRequest) -> dict:
     }
 
 
+# Types registered on this store. `session_summary_view` is deliberately listed:
+# a search filtered only by owner_id silently OMITS it, so a browse without this
+# explicit list under-reports what the store actually holds (verified: 53 vs 63).
+STORE_MEMORY_TYPES = ["semantic", "episodic", "message", "session_summary_view"]
+
+
 @app.get("/api/memory/browse")
 async def memory_browse(limit: int = 100) -> dict:
     """Structured-filter browse (no vector ranking) for everything stored about
@@ -521,23 +527,114 @@ async def memory_browse(limit: int = 100) -> dict:
     becomes visible."""
     async with make_memory_client() as mem:
         res = await mem.search_long_term_memory_async(
-            request={"filter_": {"owner_id": {"eq": f"customer-{CUSTOMER_ID}"}}, "limit": limit}
+            request={
+                "filter_": {
+                    "owner_id": {"eq": f"customer-{CUSTOMER_ID}"},
+                    "memory_type": {"in_": STORE_MEMORY_TYPES},
+                },
+                "limit": limit,
+            }
         )
     items = res.items or []
-    direct = [m for m in items if m.id.startswith("cust-")]
-    promoted = [m for m in items if not m.id.startswith("cust-")]
+
+    def origin(m) -> str:
+        if m.id.startswith("cust-"):
+            return "direct"
+        if m.memory_type == "session_summary_view":
+            return "session summary"
+        return "promoted"
+
+    by_type: dict[str, int] = {}
+    by_origin: dict[str, int] = {}
+    for m in items:
+        by_type[m.memory_type or "unknown"] = by_type.get(m.memory_type or "unknown", 0) + 1
+        by_origin[origin(m)] = by_origin.get(origin(m), 0) + 1
+
     return {
         "total": len(items),
-        "direct_written_count": len(direct),
-        "auto_promoted_count": len(promoted),
+        "direct_written_count": by_origin.get("direct", 0),
+        "auto_promoted_count": by_origin.get("promoted", 0),
+        "session_summary_count": by_origin.get("session summary", 0),
+        "by_type": by_type,
         "memories": [
             {
                 "id": m.id,
                 "text": m.text,
                 "memory_type": m.memory_type,
-                "origin": "direct" if m.id.startswith("cust-") else "promoted",
+                "origin": origin(m),
                 "topics": list(m.topics or []),
+                "session_id": m.session_id,
             }
             for m in items
         ],
     }
+
+
+@app.get("/api/memory/sessions")
+async def memory_sessions(limit: int = 20) -> dict:
+    """Short-term memory: the sessions themselves, with the TTL read straight
+    from Redis. TTL is the clearest way to see that session memory is
+    ephemeral (~24h, refreshed per event) while long-term memory is not
+    (~365d)."""
+    async with make_memory_client() as mem:
+        # list_sessions REQUIRES a filter -- a bare call 400s with
+        # "a filter (filterOwnerId or namespaceRef) or includeAll=true is
+        # required". And the response field is `items`, not `sessions`.
+        page = await mem.list_sessions_async(
+            limit=limit, filter_owner_id=f"customer-{CUSTOMER_ID}"
+        )
+    session_ids = list(page.items or [])
+
+    store_id = _env("AGENT_MEMORY_STORE_ID")
+    client = _redis_client()
+    rows = []
+    try:
+        for sid in session_ids:
+            key = f"memory:{store_id}:session_memory:{sid}"
+            ttl = await client.ttl(key)
+            key_type = await client.type(key)
+            rows.append(
+                {
+                    "session_id": sid,
+                    "redis_key": key,
+                    "redis_type": key_type if key_type != "none" else None,
+                    "ttl_seconds": ttl if ttl and ttl > 0 else None,
+                }
+            )
+    finally:
+        await client.aclose()
+
+    return {"total": getattr(page, "total", len(rows)), "sessions": rows}
+
+
+@app.get("/api/memory/tiers")
+async def memory_tiers() -> dict:
+    """Side-by-side of how the two tiers actually look in Redis. Read live:
+    key pattern, Redis data type, and TTL for one real key of each."""
+    store_id = _env("AGENT_MEMORY_STORE_ID")
+    client = _redis_client()
+    out: dict[str, Any] = {"store_id_masked": f"{store_id[:6]}…{store_id[-4:]}"}
+    try:
+        for tier, pattern in (
+            ("short_term", f"memory:{store_id}:session_memory:*"),
+            ("long_term", f"memory:{store_id}:ltm:*"),
+        ):
+            sample = None
+            count = 0
+            async for key in client.scan_iter(match=pattern, count=500):
+                count += 1
+                if sample is None:
+                    sample = key
+            entry: dict[str, Any] = {"key_pattern": pattern.replace(store_id, "<storeId>"), "key_count": count}
+            if sample:
+                ttl = await client.ttl(sample)
+                entry["sample_key"] = sample.replace(store_id, "<storeId>")
+                entry["redis_type"] = await client.type(sample)
+                entry["ttl_seconds"] = ttl if ttl and ttl > 0 else None
+                entry["ttl_human"] = (
+                    f"~{round(ttl / 3600)} hours" if ttl and ttl < 172800 else f"~{round(ttl / 86400)} days" if ttl and ttl > 0 else "no expiry"
+                )
+            out[tier] = entry
+        return out
+    finally:
+        await client.aclose()

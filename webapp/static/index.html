@@ -264,6 +264,30 @@
       </div>
 
       <div class="panel">
+        <h2>Two tiers, told apart in Redis</h2>
+        <p class="panel-sub">
+          Read live from the keyspace. The tiers differ three ways: key namespace, Redis data type,
+          and time to live — short-term expires in about a day, long-term in about a year.
+        </p>
+        <div id="tiersResult"><div class="skeleton"></div><div class="skeleton"></div></div>
+      </div>
+
+      <div class="panel">
+        <h2>Short-term memory: sessions</h2>
+        <p class="panel-sub">
+          One record per conversation, holding its ordered turns. Select a session to read its
+          turns back from the service — the same call a human agent taking over the chat would make.
+        </p>
+        <div class="btn-row" style="margin-bottom: var(--sp-3)">
+          <button class="btn" id="loadSessions" type="button">Load sessions</button>
+          <span class="inline-note" id="sessionsSummary"></span>
+        </div>
+        <div id="sessionsResult">
+          <div class="empty">Not loaded.</div>
+        </div>
+      </div>
+
+      <div class="panel">
         <h2>Long-term recall</h2>
         <p class="panel-sub">
           Semantic search over durable facts about this customer. The similarity threshold is exposed on
@@ -286,7 +310,9 @@
         <h2>Everything stored about this customer</h2>
         <p class="panel-sub">
           Structured-filter browse, no vector ranking. This is where background promotion volume becomes
-          visible: facts we wrote deliberately vs. facts the service extracted from conversation on its own.
+          visible: facts we wrote deliberately, facts the service extracted from conversation on its own,
+          and whole-session summaries it wrote. Note the type filter is explicit — a browse filtered only
+          by owner silently omits <code class="mono">session_summary_view</code> records.
         </p>
         <div class="btn-row" style="margin-bottom: var(--sp-3)">
           <button class="btn" id="runBrowse" type="button">Browse memory store</button>
